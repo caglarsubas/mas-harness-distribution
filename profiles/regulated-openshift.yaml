@@ -1,0 +1,13 @@
+global:
+  profileId: regulated-openshift
+  namespace: planeon-system
+  platform: openshift
+  architecture: amd64
+  connectivity: connected
+  storageClassName: ocs-storagecluster-ceph-rbd
+modules:
+  runtimeInfrastructure: {enabled: true}
+  modelInference: {enabled: true}
+  aiGateway: {enabled: true}
+  dataIntegration: {enabled: true}
+  controlOverview: {enabled: true}

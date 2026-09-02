@@ -1,0 +1,56 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: planeon-runtime-infrastructure
+  namespace: {{ .Values.global.namespace | quote }}
+  labels: {planeon.ai/module: runtime-infrastructure}
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: planeon-runtime-infrastructure-reader
+  namespace: {{ .Values.global.namespace | quote }}
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: planeon-runtime-infrastructure-reader
+  namespace: {{ .Values.global.namespace | quote }}
+subjects:
+  - kind: ServiceAccount
+    name: planeon-runtime-infrastructure
+    namespace: {{ .Values.global.namespace | quote }}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: planeon-runtime-infrastructure-reader}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: planeon-runtime-infrastructure
+  namespace: {{ .Values.global.namespace | quote }}
+  labels: {planeon.ai/module: runtime-infrastructure}
+spec:
+  replicas: 1
+  selector: {matchLabels: {planeon.ai/module: runtime-infrastructure}}
+  template:
+    metadata: {labels: {planeon.ai/module: runtime-infrastructure}}
+    spec:
+      serviceAccountName: planeon-runtime-infrastructure
+      automountServiceAccountToken: false
+      nodeSelector: {kubernetes.io/arch: {{ .Values.global.architecture | quote }}}
+      securityContext: {runAsNonRoot: true, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: runtime-infrastructure
+          image: {{ .Values.global.images.runtimeInfrastructure | quote }}
+          imagePullPolicy: IfNotPresent
+          args: ["serve", "--offline"]
+          env:
+            - {name: PLANEON_PROFILE_ID, value: {{ .Values.global.profileId | quote }}}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: ["ALL"]}}
+          resources:
+            requests: {cpu: {{ .Values.global.resources.runtimeInfrastructure.requestCpu | quote }}, memory: {{ .Values.global.resources.runtimeInfrastructure.requestMemory | quote }}}
+            limits: {cpu: {{ .Values.global.resources.runtimeInfrastructure.limitCpu | quote }}, memory: {{ .Values.global.resources.runtimeInfrastructure.limitMemory | quote }}}

@@ -1,0 +1,25 @@
+global:
+  profileId: disabled-default
+  namespace: planeon-system
+  platform: kubernetes
+  architecture: amd64
+  connectivity: connected
+  storageClassName: standard
+  images:
+    runtimeInfrastructure: planeon.local/runtime-infrastructure@sha256:10047593289a87b166eb103ddfabb826131f86b8b70d6f48903b80e74e81ee7d
+    modelInference: planeon.local/model-inference@sha256:1111111111111111111111111111111111111111111111111111111111111111
+    aiGateway: planeon.local/ai-gateway@sha256:2222222222222222222222222222222222222222222222222222222222222222
+    dataIntegration: planeon.local/data-integration@sha256:3333333333333333333333333333333333333333333333333333333333333333
+    controlOverview: planeon.local/control-overview@sha256:4444444444444444444444444444444444444444444444444444444444444444
+  resources:
+    runtimeInfrastructure: {requestCpu: 100m, requestMemory: 128Mi, limitCpu: 500m, limitMemory: 512Mi}
+    modelInference: {requestCpu: 500m, requestMemory: 512Mi, limitCpu: "2", limitMemory: 2Gi}
+    aiGateway: {requestCpu: 100m, requestMemory: 128Mi, limitCpu: 500m, limitMemory: 512Mi}
+    dataIntegration: {requestCpu: 100m, requestMemory: 128Mi, limitCpu: "1", limitMemory: 1Gi}
+    controlOverview: {requestCpu: 100m, requestMemory: 128Mi, limitCpu: 500m, limitMemory: 512Mi}
+modules:
+  runtimeInfrastructure: {enabled: false}
+  modelInference: {enabled: false}
+  aiGateway: {enabled: false}
+  dataIntegration: {enabled: false}
+  controlOverview: {enabled: false}

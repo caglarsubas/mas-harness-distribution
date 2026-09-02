@@ -1,0 +1,38 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: planeon-control-overview, namespace: {{ .Values.global.namespace | quote }}, labels: {planeon.ai/module: control-overview}}
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: planeon-control-overview-reader, namespace: {{ .Values.global.namespace | quote }}}
+rules: [{apiGroups: [""], resources: ["configmaps"], verbs: ["get", "list", "watch"]}]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: planeon-control-overview-reader, namespace: {{ .Values.global.namespace | quote }}}
+subjects: [{kind: ServiceAccount, name: planeon-control-overview, namespace: {{ .Values.global.namespace | quote }}}]
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: planeon-control-overview-reader}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: planeon-control-overview, namespace: {{ .Values.global.namespace | quote }}, labels: {planeon.ai/module: control-overview}}
+spec:
+  replicas: 1
+  selector: {matchLabels: {planeon.ai/module: control-overview}}
+  template:
+    metadata: {labels: {planeon.ai/module: control-overview}}
+    spec:
+      serviceAccountName: planeon-control-overview
+      automountServiceAccountToken: false
+      nodeSelector: {kubernetes.io/arch: {{ .Values.global.architecture | quote }}}
+      securityContext: {runAsNonRoot: true, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: control-overview
+          image: {{ .Values.global.images.controlOverview | quote }}
+          imagePullPolicy: IfNotPresent
+          args: ["serve", "--offline"]
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: ["ALL"]}}
+          resources:
+            requests: {cpu: {{ .Values.global.resources.controlOverview.requestCpu | quote }}, memory: {{ .Values.global.resources.controlOverview.requestMemory | quote }}}
+            limits: {cpu: {{ .Values.global.resources.controlOverview.limitCpu | quote }}, memory: {{ .Values.global.resources.controlOverview.limitMemory | quote }}}
