@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -66,6 +68,19 @@ class DispatchTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaisesRegex(dispatcher.DescriptorError, "no target descriptors"):
                 dispatcher.load_rules(Path(directory))
+
+    def test_make_fallback_reaches_only_the_closed_dispatcher(self) -> None:
+        makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+        self.assertEqual(makefile.count("python3 ci/run_make_target.py $@"), 2)
+        self.assertIn(".DEFAULT:", makefile)
+        for forbidden in ("$(eval", "$(shell", "include ", "$(MAKE)", "`", "$()"):
+            self.assertNotIn(forbidden, makefile)
+        environment = dict(os.environ)
+        environment["PYTHONDONTWRITEBYTECODE"] = "1"
+        result = subprocess.run(["make", "future-packet-target"], cwd=ROOT, env=environment, shell=False, check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("zero applicable handlers: future-packet-target", result.stderr)
+        self.assertNotIn("No rule to make target", result.stderr)
 
 
 if __name__ == "__main__":

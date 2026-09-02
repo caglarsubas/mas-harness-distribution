@@ -1,0 +1,1 @@
+{"packetId":"DIST-FIX-001","schemaVersion":"harness.planeon.ai/make-target-descriptor/v1alpha1","targets":[{"acceptedVariables":{},"argvTemplate":[["python3","-m","unittest","tests.bootstrap.test_dispatch"]],"name":"dist-fix-regression"}]}

@@ -11,4 +11,4 @@
 9. Stop when a missing decision would change a public contract, tenant isolation, destructive-data behavior, licensing disposition, or billing boundary.
 10. CI may use only the pinned credential-free checkout and the preinstalled trusted launcher. The ephemeral self-hosted runner must have no ambient cloud credentials, SSH agent, kubeconfig, container socket, or billable broker.
 11. Never execute a live campaign from this repository's CI or packet acceptance. Live work requires the separately governed external live-campaign authority.
-12. Only `DIST-001` may seed `Makefile`, `ci/run_make_target.py`, and `PORTING.yaml`; later packets add only their exact `ci/targets/<packet-id>.json` descriptors and packet-owned paths.
+12. Only `DIST-001` may seed `Makefile`, `ci/run_make_target.py`, and `PORTING.yaml`. The sole correction is `DIST-FIX-001`, limited to the Makefile generic forwarding rule, its exact descriptor, this authority note, and the bootstrap dispatch regression test. All other later packets add only their exact `ci/targets/<packet-id>.json` descriptors and packet-owned paths.
