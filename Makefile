@@ -4,3 +4,6 @@
 
 prefetch fixture-verify zero-bill:
 	@python3 ci/run_make_target.py $@
+
+.DEFAULT:
+	@python3 ci/run_make_target.py $@
