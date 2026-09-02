@@ -1,0 +1,13 @@
+[project]
+name = "planeon-harness-distribution"
+version = "0.1.0"
+description = "Deterministic offline distribution tooling for Planeon harness bundles"
+requires-python = ">=3.12,<3.13"
+dependencies = []
+license = "Apache-2.0"
+
+[project.scripts]
+harness-bundlectl = "planeon_distribution.cli:main"
+
+[tool.uv]
+package = false
