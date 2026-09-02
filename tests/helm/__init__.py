@@ -1,0 +1,1 @@
+"""Deterministic Helm profile tests."""

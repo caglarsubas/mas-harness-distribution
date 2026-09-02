@@ -1,0 +1,13 @@
+global:
+  profileId: minimal-amd64
+  namespace: planeon-system
+  platform: kubernetes
+  architecture: amd64
+  connectivity: connected
+  storageClassName: standard
+modules:
+  runtimeInfrastructure: {enabled: true}
+  modelInference: {enabled: true}
+  aiGateway: {enabled: false}
+  dataIntegration: {enabled: false}
+  controlOverview: {enabled: true}

@@ -1,0 +1,38 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: planeon-model-inference, namespace: {{ .Values.global.namespace | quote }}, labels: {planeon.ai/module: model-inference}}
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: planeon-model-inference-reader, namespace: {{ .Values.global.namespace | quote }}}
+rules: [{apiGroups: [""], resources: ["configmaps"], verbs: ["get", "list", "watch"]}]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: planeon-model-inference-reader, namespace: {{ .Values.global.namespace | quote }}}
+subjects: [{kind: ServiceAccount, name: planeon-model-inference, namespace: {{ .Values.global.namespace | quote }}}]
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: planeon-model-inference-reader}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: planeon-model-inference, namespace: {{ .Values.global.namespace | quote }}, labels: {planeon.ai/module: model-inference}}
+spec:
+  replicas: 1
+  selector: {matchLabels: {planeon.ai/module: model-inference}}
+  template:
+    metadata: {labels: {planeon.ai/module: model-inference}}
+    spec:
+      serviceAccountName: planeon-model-inference
+      automountServiceAccountToken: false
+      nodeSelector: {kubernetes.io/arch: {{ .Values.global.architecture | quote }}}
+      securityContext: {runAsNonRoot: true, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: model-inference
+          image: {{ .Values.global.images.modelInference | quote }}
+          imagePullPolicy: IfNotPresent
+          args: ["serve", "--offline"]
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: ["ALL"]}}
+          resources:
+            requests: {cpu: {{ .Values.global.resources.modelInference.requestCpu | quote }}, memory: {{ .Values.global.resources.modelInference.requestMemory | quote }}}
+            limits: {cpu: {{ .Values.global.resources.modelInference.limitCpu | quote }}, memory: {{ .Values.global.resources.modelInference.limitMemory | quote }}}

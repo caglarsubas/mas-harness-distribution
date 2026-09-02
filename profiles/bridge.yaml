@@ -1,0 +1,13 @@
+global:
+  profileId: bridge
+  namespace: planeon-system
+  platform: kubernetes
+  architecture: amd64
+  connectivity: bridge
+  storageClassName: standard
+modules:
+  runtimeInfrastructure: {enabled: true}
+  modelInference: {enabled: false}
+  aiGateway: {enabled: true}
+  dataIntegration: {enabled: true}
+  controlOverview: {enabled: true}

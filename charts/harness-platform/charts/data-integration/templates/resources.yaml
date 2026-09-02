@@ -1,0 +1,38 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: planeon-data-integration, namespace: {{ .Values.global.namespace | quote }}, labels: {planeon.ai/module: data-integration}}
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: planeon-data-integration-reader, namespace: {{ .Values.global.namespace | quote }}}
+rules: [{apiGroups: [""], resources: ["configmaps"], verbs: ["get", "list", "watch"]}]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: planeon-data-integration-reader, namespace: {{ .Values.global.namespace | quote }}}
+subjects: [{kind: ServiceAccount, name: planeon-data-integration, namespace: {{ .Values.global.namespace | quote }}}]
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: planeon-data-integration-reader}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: planeon-data-integration, namespace: {{ .Values.global.namespace | quote }}, labels: {planeon.ai/module: data-integration}}
+spec:
+  replicas: 1
+  selector: {matchLabels: {planeon.ai/module: data-integration}}
+  template:
+    metadata: {labels: {planeon.ai/module: data-integration}}
+    spec:
+      serviceAccountName: planeon-data-integration
+      automountServiceAccountToken: false
+      nodeSelector: {kubernetes.io/arch: {{ .Values.global.architecture | quote }}}
+      securityContext: {runAsNonRoot: true, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: data-integration
+          image: {{ .Values.global.images.dataIntegration | quote }}
+          imagePullPolicy: IfNotPresent
+          args: ["serve", "--offline"]
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: ["ALL"]}}
+          resources:
+            requests: {cpu: {{ .Values.global.resources.dataIntegration.requestCpu | quote }}, memory: {{ .Values.global.resources.dataIntegration.requestMemory | quote }}}
+            limits: {cpu: {{ .Values.global.resources.dataIntegration.limitCpu | quote }}, memory: {{ .Values.global.resources.dataIntegration.limitMemory | quote }}}

@@ -1,0 +1,13 @@
+global:
+  profileId: air-gap
+  namespace: planeon-system
+  platform: k3s
+  architecture: amd64
+  connectivity: airgap
+  storageClassName: local-path
+modules:
+  runtimeInfrastructure: {enabled: true}
+  modelInference: {enabled: true}
+  aiGateway: {enabled: false}
+  dataIntegration: {enabled: false}
+  controlOverview: {enabled: true}

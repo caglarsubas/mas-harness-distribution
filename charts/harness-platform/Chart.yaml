@@ -1,0 +1,27 @@
+apiVersion: v2
+name: harness-platform
+description: Thin local composition chart for selected Planeon harness modules
+type: application
+version: 0.1.0
+appVersion: 0.1.0
+dependencies:
+  - name: runtime-infrastructure
+    version: 0.1.0
+    repository: file://charts/runtime-infrastructure
+    condition: modules.runtimeInfrastructure.enabled
+  - name: model-inference
+    version: 0.1.0
+    repository: file://charts/model-inference
+    condition: modules.modelInference.enabled
+  - name: ai-gateway
+    version: 0.1.0
+    repository: file://charts/ai-gateway
+    condition: modules.aiGateway.enabled
+  - name: data-integration
+    version: 0.1.0
+    repository: file://charts/data-integration
+    condition: modules.dataIntegration.enabled
+  - name: control-overview
+    version: 0.1.0
+    repository: file://charts/control-overview
+    condition: modules.controlOverview.enabled
