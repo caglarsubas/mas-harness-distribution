@@ -218,3 +218,47 @@ def verify_layout(root: str | os.PathLike[str]) -> dict[str, Any]:
     if encode(report).decode("utf-8").count("\n") != 1:
         _fail("REPORT_ENCODING_FAILED")
     return report
+
+
+def selected_image_closure(root: str | os.PathLike[str], image_digests: set[str]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Return selected index descriptors and their exact recursive blob closure."""
+    root_path = Path(root)
+    verify_layout(root_path)
+    files = _regular_files(root_path)
+    try:
+        index = decode(_read(files["index.json"]))
+    except CanonicalJsonError as exc:
+        raise LayoutError(str(exc)) from exc
+    selected = [item for item in index["manifests"] if item["digest"] in image_digests]
+    if {item["digest"] for item in selected} != image_digests:
+        _fail("IMAGE_ROOT_NOT_FOUND")
+    records: dict[str, dict[str, Any]] = {}
+    for item in selected:
+        descriptor = _descriptor(item, {MANIFEST_MEDIA}, platform=True)
+        _, manifest_bytes = _blob(files, descriptor)
+        records[descriptor.digest] = {"digest": descriptor.digest, "mediaType": descriptor.media_type, "size": descriptor.size}
+        try:
+            manifest = decode(manifest_bytes)
+        except CanonicalJsonError as exc:
+            raise LayoutError(str(exc)) from exc
+        children = [_descriptor(manifest["config"], {CONFIG_MEDIA}, platform=False)]
+        children.extend(_descriptor(layer, LAYER_MEDIA, platform=False) for layer in manifest["layers"])
+        for child in children:
+            _blob(files, child)
+            existing = records.get(child.digest)
+            record = {"digest": child.digest, "mediaType": child.media_type, "size": child.size}
+            if existing is not None and existing != record:
+                _fail("CONFLICTING_BLOB_DESCRIPTOR")
+            records[child.digest] = record
+    return sorted(selected, key=lambda item: item["digest"]), sorted(records.values(), key=lambda item: item["digest"])
+
+
+def layout_tree_digest(root: str | os.PathLike[str]) -> str:
+    root_path = Path(root)
+    files = _regular_files(root_path)
+    digest = hashlib.sha256()
+    for relative, path in sorted(files.items()):
+        digest.update(relative.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(_read(path))
+    return f"sha256:{digest.hexdigest()}"
