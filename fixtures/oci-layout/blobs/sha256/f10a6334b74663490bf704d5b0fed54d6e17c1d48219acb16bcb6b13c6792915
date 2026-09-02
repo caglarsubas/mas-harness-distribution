@@ -1,0 +1,1 @@
+{"architecture":"arm64","config":{},"created":"2000-01-01T00:00:00Z","os":"linux","rootfs":{"diff_ids":["sha256:ce46f075a74ac873c1fb23c8efa90d3f61de82726996b7dfa724a86c21c8b072"],"type":"layers"}}
