@@ -33,7 +33,25 @@ class DispatchTests(unittest.TestCase):
             with patch.object(dispatcher.subprocess, "run") as run:
                 run.return_value.returncode = 0
                 self.assertEqual(dispatcher.dispatch("verify", {}, root), 0)
-                run.assert_called_once_with(("true",), shell=False, check=False)
+                run.assert_called_once_with(("true",), shell=False, check=False, env=dispatcher.handler_environment(os.environ))
+
+    def test_handler_pythonpath_is_exactly_repository_src(self) -> None:
+        expected = str(ROOT / "src")
+        self.assertEqual(dispatcher.handler_environment({})["PYTHONPATH"], expected)
+        child = dispatcher.handler_environment({"PYTHONPATH": "/sentinel-parent-path", "KEEP": "1"})
+        self.assertEqual(child["PYTHONPATH"], expected)
+        self.assertNotIn("sentinel-parent-path", child["PYTHONPATH"])
+        self.assertNotIn(os.pathsep, child["PYTHONPATH"])
+        self.assertEqual(child["KEEP"], "1")
+
+    def test_dispatch_never_inherits_parent_pythonpath(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write(root, "test-001.json", descriptor())
+            with patch.dict(os.environ, {"PYTHONPATH": "/sentinel-parent-path"}), patch.object(dispatcher.subprocess, "run") as run:
+                run.return_value.returncode = 0
+                self.assertEqual(dispatcher.dispatch("verify", {}, root), 0)
+                self.assertEqual(run.call_args.kwargs["env"]["PYTHONPATH"], str(ROOT / "src"))
 
     def test_unknown_duplicate_owner_filename_and_shell_are_denied(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

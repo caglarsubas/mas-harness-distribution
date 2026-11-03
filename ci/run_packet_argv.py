@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Run one hash-pinned packet's direct argv inside established isolation."""
+"""Execute task-packet command argv without a shell or YAML object construction."""
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import os
@@ -12,107 +13,237 @@ import sys
 from pathlib import Path
 from typing import Any
 
-PACKET_ENV = "HARNESS_TASK_PACKET"
-OFFLINE_ENV = {"UV_OFFLINE": "1", "UV_FROZEN": "1", "UV_NO_SYNC": "1"}
-EXPECTED_EXECUTION = {"wrapperArgv": ["./ci/verify-offline.sh"], "packetPathEnvironment": PACKET_ENV, "packetPathMode": "HASH_PINNED_READ_ONCE_NO_CHILD_PATH", "commandTransport": "ARGV_ARRAY_V1", "isolation": "OS_ENFORCED_DENY_ALL_OUTBOUND", "sessionScope": "SINGLE_PROCESS_TREE", "prefetchOutsideSession": False, "offlineEnvironment": OFFLINE_ENV}
-FORBIDDEN_EXECUTABLES = {"bash", "dash", "env", "sh", "zsh"}
-FORBIDDEN_OFFLINE_TOKENS = {"add", "curl", "download", "fetch", "install", "npx", "prefetch", "pull", "sync", "wget"}
-CHILD_ENV = {"CI", "GITHUB_ACTIONS", "GITHUB_EVENT_NAME", "GITHUB_REPOSITORY", "GITHUB_SHA", "GITHUB_WORKSPACE", "HOME", "LANG", "LC_ALL", "LOGNAME", "PATH", "TMPDIR", "USER", "PYTHONDONTWRITEBYTECODE", "PYTHONPATH", "SOURCE_DATE_EPOCH", "VIRTUAL_ENV", "UV_CACHE_DIR", "UV_FROZEN", "UV_NO_SYNC", "UV_OFFLINE", "UV_PROJECT_ENVIRONMENT", "UV_PYTHON_DOWNLOADS", "HARNESS_OFFLINE_BACKEND", "HARNESS_OFFLINE_ENFORCED", "HARNESS_OFFLINE_SESSION_ID"}
+PACKET_ENVIRONMENT = "HARNESS_TASK_PACKET"
+OFFLINE_ENVIRONMENT = {
+    "UV_OFFLINE": "1",
+    "UV_FROZEN": "1",
+    "UV_NO_SYNC": "1",
+}
+EXPECTED_EXECUTION = {
+    "wrapperArgv": ["./ci/verify-offline.sh"],
+    "packetPathEnvironment": PACKET_ENVIRONMENT,
+    "packetPathMode": "HASH_PINNED_READ_ONCE_NO_CHILD_PATH",
+    "commandTransport": "ARGV_ARRAY_V1",
+    "isolation": "OS_ENFORCED_DENY_ALL_OUTBOUND",
+    "sessionScope": "SINGLE_PROCESS_TREE",
+    "prefetchOutsideSession": False,
+    "offlineEnvironment": OFFLINE_ENVIRONMENT,
+}
+FORBIDDEN_OFFLINE_TOKENS = {
+    "curl",
+    "wget",
+    "npx",
+    "prefetch",
+    "fetch",
+    "download",
+    "install",
+    "sync",
+    "add",
+    "pull",
+}
+FORBIDDEN_EXECUTABLE_BASENAMES = {"sh", "bash", "zsh", "dash", "env"}
+CHILD_ENVIRONMENT_ALLOWLIST = {
+    "CI",
+    "GITHUB_ACTIONS",
+    "GITHUB_WORKSPACE",
+    "HARNESS_OFFLINE_BACKEND",
+    "HARNESS_OFFLINE_ENFORCED",
+    "HARNESS_OFFLINE_SESSION_ID",
+    "HOME",
+    "LANG",
+    "LC_ALL",
+    "LOGNAME",
+    "PATH",
+    "PYTHONDONTWRITEBYTECODE",
+    "TMPDIR",
+    "USER",
+    "UV_CACHE_DIR",
+    "UV_FROZEN",
+    "UV_NO_SYNC",
+    "UV_OFFLINE",
+    "UV_PROJECT_ENVIRONMENT",
+    "UV_PYTHON_DOWNLOADS",
+    "VIRTUAL_ENV",
+}
 
 
-class PacketError(ValueError):
-    pass
+class PacketTransportError(ValueError):
+    """The hash-pinned packet transport is malformed or unsafe."""
 
 
-def read_packet(path: Path) -> tuple[str, str]:
-    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0))
+def read_packet_text(path: Path) -> tuple[str, str]:
+    flags = os.O_RDONLY
+    if hasattr(os, "O_CLOEXEC"):
+        flags |= os.O_CLOEXEC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(path, flags)
     try:
-        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
-            raise PacketError("packet must be a regular file")
-        data = bytearray()
-        while chunk := os.read(descriptor, 65_536):
-            data.extend(chunk)
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise PacketTransportError("HARNESS_TASK_PACKET must name a regular file")
+        with os.fdopen(descriptor, "r", encoding="utf-8", closefd=False) as stream:
+            text = stream.read()
     finally:
         os.close(descriptor)
-    try:
-        return bytes(data).decode("utf-8"), hashlib.sha256(data).hexdigest()
-    except UnicodeError as exc:
-        raise PacketError("packet is not UTF-8") from exc
+    return text, hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def inline_json(text: str, field: str) -> Any:
+def verify_packet_digest(path: Path, expected_digest: str) -> None:
+    """Fail if a child replaced or changed the packet authority."""
+
+    _, actual_digest = read_packet_text(path)
+    if actual_digest != expected_digest:
+        raise PacketTransportError("packet authority changed during execution")
+
+
+def load_json_field(packet_text: str, field: str) -> Any:
     prefix = f"{field}:"
-    values = [line[len(prefix):].strip() for line in text.splitlines() if line.startswith(prefix)]
-    if len(values) != 1 or not values[0]:
-        raise PacketError(f"packet must contain one inline JSON {field}")
+    matches = [line[len(prefix) :].strip() for line in packet_text.splitlines() if line.startswith(prefix)]
+    if len(matches) != 1 or not matches[0]:
+        raise PacketTransportError(f"packet must contain one inline JSON {field} field")
     try:
-        return json.loads(values[0])
+        return json.loads(matches[0])
     except json.JSONDecodeError as exc:
-        raise PacketError(f"packet {field} is not inline JSON") from exc
+        raise PacketTransportError(f"packet {field} is not inline JSON") from exc
 
 
-def command_arrays(text: str, field: str) -> list[list[str]]:
-    value = inline_json(text, field)
-    if not isinstance(value, list) or not 1 <= len(value) <= 32:
-        raise PacketError(f"packet {field} must be a bounded non-empty array")
-    for command in value:
-        if not isinstance(command, list) or not 1 <= len(command) <= 64 or not all(isinstance(item, str) and item and "\x00" not in item and "\n" not in item for item in command):
-            raise PacketError(f"packet {field} contains invalid argv")
-        if Path(command[0]).name in FORBIDDEN_EXECUTABLES:
-            raise PacketError("shell transport is forbidden")
-    return value
+def load_command_field(packet_text: str, field: str) -> list[list[str]]:
+    value = load_json_field(packet_text, field)
+    if not isinstance(value, list):
+        raise PacketTransportError(f"packet {field} must be an array")
+    commands: list[list[str]] = []
+    for index, command in enumerate(value):
+        if not isinstance(command, list) or not command:
+            raise PacketTransportError(f"packet {field}[{index}] must be a non-empty argv array")
+        if not all(isinstance(argument, str) and argument and "\x00" not in argument for argument in command):
+            raise PacketTransportError(f"packet {field}[{index}] has an invalid argv value")
+        commands.append(command)
+    return commands
 
 
-def verify_digest(path: Path, expected: str) -> None:
-    if read_packet(path)[1] != expected:
-        raise PacketError("packet authority changed during execution")
+def validate_direct_argv(command: list[str]) -> None:
+    if Path(command[0]).name in FORBIDDEN_EXECUTABLE_BASENAMES:
+        raise PacketTransportError(f"shell/environment executable is forbidden: {command[0]}")
 
 
-def run(commands: list[list[str]], environment: dict[str, str], packet: Path, digest: str, phase: str) -> int:
+def validate_offline_argv(command: list[str]) -> None:
+    validate_direct_argv(command)
+    folded = {argument.casefold() for argument in command}
+    overlap = sorted(folded & FORBIDDEN_OFFLINE_TOKENS)
+    if overlap:
+        raise PacketTransportError(f"network/prefetch token is forbidden offline: {overlap[0]}")
+    if command[:2] == ["make", "verify-offline"]:
+        raise PacketTransportError("recursive make verify-offline is forbidden")
+    if command[0] == "uv":
+        missing = [flag for flag in ("--offline", "--frozen", "--no-sync") if flag not in command]
+        if missing:
+            raise PacketTransportError(f"offline uv argv is missing {', '.join(missing)}")
+
+
+def validate_execution_contract(packet_text: str) -> None:
+    actual = load_json_field(packet_text, "offlineExecution")
+    if actual != EXPECTED_EXECUTION:
+        raise PacketTransportError("packet offlineExecution does not match ARGV_ARRAY_V1 contract")
+
+
+def scrub_environment(environment: dict[str, str]) -> dict[str, str]:
+    return {
+        name: value
+        for name, value in environment.items()
+        if name in CHILD_ENVIRONMENT_ALLOWLIST
+    }
+
+
+def run_commands(
+    commands: list[list[str]],
+    *,
+    environment: dict[str, str],
+    packet_path: Path,
+    packet_digest: str,
+    phase: str,
+) -> int:
     for command in commands:
-        print(f"{phase} argv: {json.dumps(command, separators=(',', ':'))}", flush=True)
+        print(
+            f"{phase} argv:",
+            json.dumps(command, separators=(",", ":")),
+            flush=True,
+        )
         completed = subprocess.run(command, env=environment, shell=False, check=False)
-        verify_digest(packet, digest)
-        if completed.returncode:
+        verify_packet_digest(packet_path, packet_digest)
+        if completed.returncode != 0:
             return completed.returncode
     return 0
 
 
+def parse_arguments() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    return parser.parse_args()
+
+
 def main() -> int:
-    raw_path = os.environ.get(PACKET_ENV)
+    parse_arguments()
+    raw_path = os.environ.get(PACKET_ENVIRONMENT)
     if not raw_path:
-        raise PacketError(f"{PACKET_ENV} is required")
-    packet = Path(raw_path)
-    text, digest = read_packet(packet)
-    if inline_json(text, "offlineExecution") != EXPECTED_EXECUTION:
-        raise PacketError("offlineExecution contract mismatch")
-    prefetch = command_arrays(text, "prefetchCommands")
-    acceptance = command_arrays(text, "offlineAcceptanceCommands")
-    if prefetch != [["make", "prefetch"]]:
-        raise PacketError("prefetch command must be the local-only Make entry point")
-    for command in acceptance:
-        overlap = {argument.casefold() for argument in command} & FORBIDDEN_OFFLINE_TOKENS
-        if overlap:
-            raise PacketError(f"offline argv contains forbidden token: {sorted(overlap)[0]}")
-    environment = {name: value for name, value in os.environ.items() if name in CHILD_ENV}
-    if environment.get("HARNESS_OFFLINE_ENFORCED") != "1" or not environment.get("HARNESS_OFFLINE_BACKEND") or not environment.get("HARNESS_OFFLINE_SESSION_ID"):
-        raise PacketError("OS-enforced isolation identity is required")
-    if any(environment.get(name) != value for name, value in OFFLINE_ENV.items()):
-        raise PacketError("offline environment contract mismatch")
-    if PACKET_ENV in environment or "HARNESS_WARM_SOURCE_ROOTS" in environment:
-        raise PacketError("authority paths must be hidden from packet children")
+        raise PacketTransportError(f"{PACKET_ENVIRONMENT} is required")
+    packet_path = Path(raw_path)
+    packet_text, packet_digest = read_packet_text(packet_path)
+    validate_execution_contract(packet_text)
+    prefetch_commands = load_command_field(packet_text, "prefetchCommands")
+    offline_commands = load_command_field(packet_text, "offlineAcceptanceCommands")
+    for command in prefetch_commands + offline_commands:
+        validate_direct_argv(command)
+    for command in prefetch_commands:
+        if command != ["make", "prefetch"]:
+            raise PacketTransportError(
+                f"prefetch argv is not the local-cache-only entry point: {command}"
+            )
+    for command in offline_commands:
+        validate_offline_argv(command)
+
+    environment = scrub_environment(os.environ.copy())
+    if environment.get("HARNESS_OFFLINE_ENFORCED") != "1":
+        raise PacketTransportError("packet execution requires OS egress isolation")
+    for name, value in OFFLINE_ENVIRONMENT.items():
+        if environment.get(name) != value:
+            raise PacketTransportError(f"offline environment requires {name}={value}")
     canary = Path(__file__).with_name("network_canary.py")
-    if subprocess.run([sys.executable, str(canary)], env=environment, shell=False, check=False).returncode:
-        return 2
-    verify_digest(packet, digest)
-    print(f"packet={digest} phases=prefetch,offline session={environment['HARNESS_OFFLINE_SESSION_ID']}", flush=True)
-    result = run(prefetch, environment, packet, digest, "prefetch-local-only")
-    return result or run(acceptance, environment, packet, digest, "offline-acceptance")
+    result = subprocess.run(
+        [sys.executable, "-I", str(canary)],
+        env=environment,
+        shell=False,
+        check=False,
+    )
+    if result.returncode != 0:
+        return result.returncode
+    verify_packet_digest(packet_path, packet_digest)
+
+    print(
+        f"packet={packet_digest} phases=prefetch,offline "
+        f"session={environment.get('HARNESS_OFFLINE_SESSION_ID', 'missing')}",
+        flush=True,
+    )
+    prefetch_result = run_commands(
+        prefetch_commands,
+        environment=environment,
+        packet_path=packet_path,
+        packet_digest=packet_digest,
+        phase="prefetch-local-cache-only",
+    )
+    if prefetch_result != 0:
+        return prefetch_result
+    return run_commands(
+        offline_commands,
+        environment=environment,
+        packet_path=packet_path,
+        packet_digest=packet_digest,
+        phase="offline-acceptance",
+    )
 
 
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
-    except (OSError, PacketError) as exc:
+    except PacketTransportError as exc:
         print(f"packet transport refused: {exc}", file=sys.stderr)
         raise SystemExit(2)

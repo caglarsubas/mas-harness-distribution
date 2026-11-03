@@ -19,6 +19,7 @@ VARIABLE = re.compile(r"^[A-Z][A-Z0-9_]*$")
 MAKE_ASSIGNMENT = re.compile(r"(?:^|\s)([A-Za-z_][A-Za-z0-9_]*)=")
 ALLOWED_VARIABLES = {"BACKEND", "CAMPAIGN", "MODULE", "PACK", "PLATFORM", "PROFILE", "PROVIDERS"}
 FORBIDDEN_EXECUTABLES = {"bash", "dash", "env", "sh", "zsh"}
+SOURCE_ROOT = Path(__file__).resolve().parents[1] / "src"
 
 
 class DescriptorError(ValueError):
@@ -134,6 +135,12 @@ def load_rules(directory: Path) -> tuple[Rule, ...]:
     return tuple(sorted(rules, key=lambda item: (item.packet_id, item.target)))
 
 
+def handler_environment(parent: Mapping[str, str]) -> dict[str, str]:
+    environment = {name: value for name, value in parent.items() if name != "PYTHONPATH"}
+    environment["PYTHONPATH"] = str(SOURCE_ROOT)
+    return environment
+
+
 def dispatch(target: str, supplied: Mapping[str, str], directory: Path) -> int:
     if TARGET.fullmatch(target) is None:
         raise DescriptorError("target name is invalid")
@@ -145,7 +152,7 @@ def dispatch(target: str, supplied: Mapping[str, str], directory: Path) -> int:
     for rule in matches:
         for command in rule.render(supplied):
             print(f"make-handler packet={rule.packet_id} argv={json.dumps(command, separators=(',', ':'))}", flush=True)
-            completed = subprocess.run(command, shell=False, check=False)
+            completed = subprocess.run(command, shell=False, check=False, env=handler_environment(os.environ))
             if completed.returncode:
                 return completed.returncode
     return 0

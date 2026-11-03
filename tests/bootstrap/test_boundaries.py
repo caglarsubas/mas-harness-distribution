@@ -29,7 +29,10 @@ class BoundaryTests(unittest.TestCase):
             workflow.mkdir(parents=True)
             (workflow / "verify.yml").write_text("runs-on: ubuntu-latest\n", encoding="utf-8")
             failures = scan(root)
+            self.assertIn("WORKFLOW_PRESENT:.github/workflows/verify.yml", failures)
             self.assertTrue(any(value.startswith("HOSTED_RUNNER:") for value in failures))
+        with tempfile.TemporaryDirectory() as directory:
+            self.assertFalse(any(value.startswith("WORKFLOW_") for value in scan(Path(directory))))
 
     def test_toolchain_lock_is_closed_and_dependency_free(self) -> None:
         lock = json.loads((ROOT / "toolchain.lock").read_text(encoding="utf-8"))
