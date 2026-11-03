@@ -23,15 +23,11 @@ SCAN_EXCLUSIONS = {"ci/zero_bill_scan.py"}
 
 def scan(root: Path) -> list[str]:
     failures: list[str] = []
-    workflow = root / ".github/workflows/verify.yml"
-    if not workflow.is_file():
-        failures.append("WORKFLOW_MISSING:.github/workflows/verify.yml")
-    else:
-        body = workflow.read_text(encoding="utf-8")
-        required = ["self-hosted", "harness-engineering", "ephemeral", "credential-free", "actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683", "persist-credentials: false", "/opt/planeon/bin/harness-offline-launch"]
-        for token in required:
-            if token not in body:
-                failures.append(f"WORKFLOW_BOUNDARY_MISSING:{token}")
+    workflows = root / ".github/workflows"
+    if workflows.exists():
+        for path in sorted(workflows.rglob("*")):
+            if path.is_file():
+                failures.append(f"WORKFLOW_PRESENT:{path.relative_to(root).as_posix()}")
     for path in sorted(root.rglob("*")):
         if not path.is_file() or ".git" in path.parts or path.suffix.lower() not in TEXT_SUFFIXES:
             continue
