@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import os
 from pathlib import Path
 
@@ -21,7 +22,7 @@ def publish_directory(staging: Path, destination: Path, exists_code: str, error:
             os.rmdir(destination)
         except OSError:
             pass
-        raise error(exists_code) from exc
+        raise error(exists_code if exc.errno in {errno.EEXIST, errno.ENOTEMPTY} else "ATOMIC_PUBLISH_FAILED") from exc
 
 
 def publish_file(temporary: Path, destination: Path, exists_code: str, error: type[ValueError]) -> None:

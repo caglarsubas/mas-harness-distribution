@@ -27,8 +27,9 @@ from tests.airgap.helpers import evidence_map, released_fixture
 from tests.signing.helpers import NOW, SUPPLY, keypair, prepare, sha, trust_document, trust_key, write
 
 ROOT = Path(__file__).resolve().parents[2]
+# Product code plus the campaign tooling under scripts/: none of it may open a network path.
 SHIPPED = [*sorted((ROOT / "src/planeon_distribution").glob("*.py")), *sorted((ROOT / "cmd/harness-bundlectl").glob("*.py")), *sorted((ROOT / "scripts").glob("*.py"))]
-NETWORK_MODULES = {"aiohttp", "asyncio", "ftplib", "http", "httpx", "imaplib", "poplib", "requests", "smtplib", "socket", "socketserver", "ssl", "telnetlib", "urllib", "urllib3", "xmlrpc"}
+NETWORK_MODULES = {"_socket", "_ssl", "aiohttp", "asyncio", "ftplib", "http", "httpx", "imaplib", "multiprocessing", "poplib", "requests", "smtplib", "socket", "socketserver", "ssl", "telnetlib", "urllib", "urllib3", "xmlrpc"}
 # The same OS denial errnos the offline network canary accepts for each isolation backend.
 DENIAL_ERRNOS = {"darwin-sandbox": {errno.EACCES, errno.EPERM}, "linux-firejail": {errno.EACCES, errno.EPERM, errno.ENETUNREACH, errno.EHOSTUNREACH}}
 
@@ -40,7 +41,20 @@ def imported_modules(path: Path) -> set[str]:
             modules.update(alias.name.split(".")[0] for alias in node.names)
         elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
             modules.add(node.module.split(".")[0])
+        elif isinstance(node, ast.Call) and dynamic_import(node.func):
+            argument = node.args[0] if node.args else None
+            if isinstance(argument, ast.Constant) and isinstance(argument.value, str):
+                modules.add(argument.value.split(".")[0])
+            else:
+                modules.add("<non-constant dynamic import>")
     return modules
+
+
+def dynamic_import(function: ast.expr) -> bool:
+    """``__import__(...)`` and ``importlib.import_module(...)`` count as imports of their named module."""
+    if isinstance(function, ast.Name):
+        return function.id == "__import__"
+    return isinstance(function, ast.Attribute) and function.attr == "import_module" and isinstance(function.value, ast.Name) and function.value.id == "importlib"
 
 
 def strings(value: object) -> list[str]:
@@ -58,7 +72,7 @@ class AirgapRuntimeTests(unittest.TestCase):
         self.assertGreater(len(SHIPPED), 15)
         for path in SHIPPED:
             with self.subTest(path=path.relative_to(ROOT).as_posix()):
-                self.assertEqual(imported_modules(path) & NETWORK_MODULES, set())
+                self.assertEqual(imported_modules(path) & (NETWORK_MODULES | {"<non-constant dynamic import>"}), set())
 
     def test_external_signing_tool_runs_offline_with_a_closed_environment(self) -> None:
         calls: list[tuple[list[str], dict[str, str]]] = []
@@ -113,7 +127,8 @@ class AirgapRuntimeTests(unittest.TestCase):
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client:
                 client.settimeout(0.5)
-                result = client.connect_ex(("1.1.1.1", 443))
+                # TEST-NET-1 (RFC 5737): never a real host, so even a misconfigured run contacts nothing.
+                result = client.connect_ex(("192.0.2.1", 443))
         except OSError as exc:
             result = exc.errno
         self.assertIn(result, DENIAL_ERRNOS[backend])

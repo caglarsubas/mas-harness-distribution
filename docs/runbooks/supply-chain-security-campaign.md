@@ -7,7 +7,7 @@ It runs offline against fixtures regenerated from this repository; it reads no c
 
 | Target | What it runs | What it proves |
 |---|---|---|
-| `make build-reproducible` | `tests/reproducibility/` | Two clean builds in fresh interpreters, from byte-identical inputs with different file modes, mtimes, umask, hash seed, time zone and working directory, give the same bundle id, lock and file tree; a changed input changes the id; a corrupted source blob is refused. |
+| `make build-reproducible` | `tests/reproducibility/` | Two clean builds in fresh interpreters, from byte-identical inputs with different file modes, mtimes, umask, hash seed, time zone and working directory, give the same bundle id, lock and file tree; a changed profile changes the id; a corrupted source blob is refused. |
 | `make supply-chain-security` | `tests/security/` | Every case in `fixtures/attacks/campaign.json` is refused with its exact code; publication races never overwrite a concurrent writer. |
 | `make airgap-runtime` | `tests/airgap/test_runtime.py` | Shipped code imports no network module; Cosign runs only with offline flags and a closed environment; an imported release holds no remote or mutable reference; inside the OS-enforced offline session an outbound connection is denied. |
 
@@ -24,7 +24,7 @@ It prints the canonical JSON report and exits 0 only when every case is `REFUSED
 - `layout`: corrupt, truncated, missing, extra and symlinked blobs in an OCI layout.
 - `staging`: a corrupted build source, and an extra or swapped blob injected into the build's private staging.
 - `candidate`: a built candidate whose layout was corrupted, extended or consistently rewritten before signing.
-- `promotion`: the same tampering between signing and promotion.
+- `promotion`: a corrupted or consistently rewritten layout between signing and promotion.
 - `export`: a released bundle whose layout was rewritten before export.
 - `transfer`: an archive tampered on the transfer medium, with and without resealed manifest checksums and a
   matching out-of-band digest.
@@ -46,5 +46,8 @@ It prints the canonical JSON report and exits 0 only when every case is `REFUSED
 ## Recorded limits
 
 - Publication claims the destination with an exclusive `mkdir` and then atomically replaces the empty claim. A
-  crash between the two leaves an empty directory that blocks that name with `*_DESTINATION_EXISTS`; inspect it
-  and remove it by hand.
+  crash between the two leaves an empty directory that blocks that name with the operation's exists code
+  (`DESTINATION_EXISTS`, or the `*_DESTINATION_EXISTS` form); inspect it and remove it by hand.
+- An export archive is published by hard-linking its temporary file, which is then unlinked. A crash between the
+  two leaves a `.planeon-airgap-*.tar` sibling; the archive then has two links and the importer refuses it as
+  `ARCHIVE_UNAVAILABLE` until the sibling is removed by hand.

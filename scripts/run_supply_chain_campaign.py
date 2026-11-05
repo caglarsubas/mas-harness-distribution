@@ -4,7 +4,8 @@
 Every case in fixtures/attacks/campaign.json copies a fresh base artifact, applies one hostile mutation and
 runs the production operation that must refuse it. A case is REFUSED_AS_EXPECTED only when the refusal code
 equals the catalog's code and the operation left no destination behind. Nothing here opens a socket or
-reads a mutable input; the base fixture is regenerated from the repository's own fixtures each run.
+reads a mutable input; the base fixture is regenerated from the repository's own fixtures each run. This is test
+tooling, not shipped product code: it reuses the test fixture helpers under tests/.
 
 Run from the repository root with the package importable:
     PYTHONPATH=src python3 -B scripts/run_supply_chain_campaign.py
@@ -428,7 +429,7 @@ DESTINATIONS = ("bundle", "signed", "imported", "transfer.tar", "releases")
 
 
 def _left_behind(work: Path) -> list[str]:
-    result = []
+    result = sorted(path.name for path in work.iterdir() if path.name.startswith(".planeon-"))
     for name in DESTINATIONS:
         path = work / name
         if name == "releases" and path.is_dir():

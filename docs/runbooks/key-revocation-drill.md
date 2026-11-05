@@ -11,8 +11,8 @@ than the one it replaces. A revoked key is refused at or after `effectiveAt`, wh
 | `sign-revoked-release-key` | The release key is revoked in the trust set the approval names. | `TRUST_KEY_REVOKED` |
 | `sign-revoked-approval-key` | The approval key is revoked. | `TRUST_KEY_REVOKED` |
 | `sign-revocation-stripped` | The approval was issued under a trust set that revokes the release key; an attacker strips the revocation and recomputes the trust digest. | `RELEASE_APPROVAL_TRUST_MISMATCH` |
-| `export-release-trust-revoked` | A released bundle's own trust set is replaced by one that revokes its signing key. | `TRUST_KEY_REVOKED` |
-| `import-resealed-trust-revoked` | The same replacement on the transfer medium, with resealed checksums. | `TRUST_KEY_REVOKED` |
+| `export-release-trust-revoked` | A released bundle's own trust set is replaced by one that revokes its signing key, effective at the release's `verificationTime`. | `TRUST_KEY_REVOKED` |
+| `import-resealed-trust-revoked` | The same replacement on the transfer medium, with resealed checksums, effective at the release's `verificationTime`. | `TRUST_KEY_REVOKED` |
 
 Trust-sequence rollback, validity windows and role widening are covered by `make rotation-test`.
 
@@ -23,9 +23,13 @@ Trust-sequence rollback, validity windows and role widening are covered by `make
 3. Run `make supply-chain-security` and `make rotation-test`; both must pass.
 4. Revoke faulty candidates and releases; restore the prior signed bundle and trust set (the packet's rollback).
 
-## Recorded limit
+## What the drill proves, and its limit
+
+The drill proves the refusal for every candidate signed after the revocation is effective, and for a release whose
+embedded trust set is replaced by one that revokes its signing key at or before the release's `verificationTime`
+(`TRUST_KEY_REVOKED`). Building involves no trust check.
 
 `verify_signed_release` verifies a release against the trust set embedded in it, at the release's own
-`verificationTime`. A revocation issued after release therefore does not reach an already released bundle
-inside this repository; consumers must refuse it with the newer trust set they hold. The drill above proves the
-refusal for every artifact built, signed, exported or imported after the revocation.
+`verificationTime`. Export and import of a release signed **before** a revocation are therefore **not** refused
+inside this repository (finding F-005A-1). F-005A-1 is carried to a successor packet: revocation reach belongs at
+import time, checked against the tenant's current trust set.
