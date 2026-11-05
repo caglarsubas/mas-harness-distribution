@@ -56,6 +56,23 @@ def dynamic_import(function: ast.expr) -> bool:
         return function.id == "__import__"
     return isinstance(function, ast.Attribute) and function.attr == "import_module" and isinstance(function.value, ast.Name) and function.value.id == "importlib"
 
+# Linux creates these fallback tunnel devices in every new network namespace when their modules are loaded; they are
+# down and carry no address or route, so a session holding only them and loopback still has no network.
+FALLBACK_TUNNELS = {"erspan0", "gre0", "gretap0", "ip6_vti0", "ip6erspan0", "ip6gre0", "ip6gretap0", "ip6tnl0", "ip_vti0", "sit0", "tunl0"}
+
+
+def only_loopback_network(route_table: Path = Path("/proc/net/route")) -> bool:
+    """True when the session has no usable interface besides loopback (fails closed on anything else)."""
+    try:
+        names = {name for _, name in socket.if_nameindex()}
+    except OSError:
+        # A netlink filter can refuse the interface list; then the main IPv4 table must hold only its header line.
+        try:
+            return len(route_table.read_text(encoding="ascii").splitlines()) == 1
+        except (OSError, UnicodeError):
+            return False
+    return "lo" in names and names - {"lo"} <= FALLBACK_TUNNELS
+
 
 def strings(value: object) -> list[str]:
     if isinstance(value, str):
@@ -127,7 +144,7 @@ class AirgapRuntimeTests(unittest.TestCase):
         if backend == "linux-firejail":
             # Unreachable errnos are accepted on this backend, so prove the session itself has no network: a host
             # without a route outside the sandbox would otherwise return the same errno.
-            self.assertEqual([name for _, name in socket.if_nameindex()], ["lo"])
+            self.assertTrue(only_loopback_network(), "a usable non-loopback interface is present")
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client:
                 client.settimeout(0.5)
@@ -136,6 +153,22 @@ class AirgapRuntimeTests(unittest.TestCase):
         except OSError as exc:
             result = exc.errno
         self.assertIn(result, DENIAL_ERRNOS[backend])
+
+    def test_loopback_rule_allows_fallback_tunnels_and_refuses_real_interfaces(self) -> None:
+        """Exercises the firejail-only rule on any host, without touching the network."""
+        cases = {("lo",): True, ("lo", "sit0", "tunl0", "ip6tnl0"): True, ("lo", "eth0"): False, ("sit0",): False, ("lo", "tunl0", "wlan0"): False}
+        for names, expected in cases.items():
+            with self.subTest(names=names), mock.patch.object(socket, "if_nameindex", return_value=list(enumerate(names, 1))):
+                self.assertIs(only_loopback_network(), expected)
+        with tempfile.TemporaryDirectory() as directory:
+            header = "Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\tMTU\tWindow\tIRTT\n"
+            table = Path(directory) / "route"
+            with mock.patch.object(socket, "if_nameindex", side_effect=OSError(errno.EPERM, "netlink filtered")):
+                table.write_text(header, encoding="ascii")
+                self.assertTrue(only_loopback_network(table))
+                table.write_text(header + "eth0\t00000000\t0102A8C0\t0003\t0\t0\t0\t00000000\t0\t0\t0\n", encoding="ascii")
+                self.assertFalse(only_loopback_network(table))
+                self.assertFalse(only_loopback_network(Path(directory) / "missing"))
 
 
 LAYER_COUNT = 5

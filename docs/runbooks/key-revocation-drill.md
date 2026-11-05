@@ -28,17 +28,18 @@ also covered by `make rotation-test`.
 
 ## What the drill proves, and its limit
 
-The drill proves the refusal for every candidate signed, at or after `effectiveAt`, with a trust set that carries
-the revocation (the approval must name that trust set), and for a release whose embedded trust set is replaced by
-one that revokes its signing key at or before the release's `verificationTime` (`TRUST_KEY_REVOKED`). Building
-involves no trust check.
+The drill proves the refusal for every candidate signed with a `verification_time` at or after `effectiveAt`, using a
+trust set that carries the revocation (the approval must name that trust set), and for a release whose embedded
+trust set is replaced by one that revokes its signing key at or before the release's `verificationTime`
+(`TRUST_KEY_REVOKED`). Building involves no trust check.
 
 Finding F-005A-1, carried to a successor packet, covers what is **not** refused inside this repository:
 
 - `verify_signed_release` verifies a release against the trust set embedded in it, at the release's own
   `verificationTime`, so export and import of a release signed **before** a revocation are accepted.
 - `sign_candidate` takes its trust set only from the caller and enforces no minimum trust sequence, so signing after
-  `effectiveAt` with the pre-revocation trust set and an approval issued under it is accepted too.
+  `effectiveAt` with the pre-revocation trust set and an approval issued under it is accepted too. `sign_candidate`
+  also takes its `verification_time` from the caller; no clock or timestamp authority is consulted.
 
 Revocation reach belongs at import time, checked against the tenant's current trust set. Each release already binds
 the trust set it was signed under: `signed-release.json` records `trustBundleFileDigest` (the digest of the embedded
