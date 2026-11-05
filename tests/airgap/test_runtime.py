@@ -124,10 +124,14 @@ class AirgapRuntimeTests(unittest.TestCase):
         backend = os.environ.get("HARNESS_OFFLINE_BACKEND", "")
         if os.environ.get("HARNESS_OFFLINE_ENFORCED") != "1" or backend not in DENIAL_ERRNOS:
             self.skipTest("runs only inside the OS-enforced offline session; never probes an open network")
+        if backend == "linux-firejail":
+            # Unreachable errnos are accepted on this backend, so prove the session itself has no network: a host
+            # without a route outside the sandbox would otherwise return the same errno.
+            self.assertEqual([name for _, name in socket.if_nameindex()], ["lo"])
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client:
                 client.settimeout(0.5)
-                # TEST-NET-1 (RFC 5737): never a real host, so even a misconfigured run contacts nothing.
+                # TEST-NET-1 (RFC 5737): never a real host.
                 result = client.connect_ex(("192.0.2.1", 443))
         except OSError as exc:
             result = exc.errno

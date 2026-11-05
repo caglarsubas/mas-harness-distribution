@@ -38,13 +38,15 @@ It prints the canonical JSON report and exits 0 only when every case is `REFUSED
 1. Stop the release; do not sign, promote or export anything built since the last passing run.
 2. Read the case's `observedError` and `observedCode`. `ACCEPTED` means the hostile input was not refused: treat
    it as a security defect, not a test fix.
-3. A non-empty `leftBehind` means an operation published something while refusing; remove that output by hand
-   only after recording it.
+3. A non-empty `leftBehind` means an operation published something, or left a `.planeon-*` staging or temporary
+   sibling, while refusing; remove it by hand only after recording it.
 4. Change the catalog's expected code only when the new refusal is at least as early and as specific, and say why
    in the pull request.
 
 ## Recorded limits
 
+- A crash while an operation is staging leaves a `.planeon-*` staging directory or temporary file beside the
+  destination; nothing is published, and the sibling is removed by hand.
 - Publication claims the destination with an exclusive `mkdir` and then atomically replaces the empty claim. A
   crash between the two leaves an empty directory that blocks that name with the operation's exists code
   (`DESTINATION_EXISTS`, or the `*_DESTINATION_EXISTS` form); inspect it and remove it by hand.
