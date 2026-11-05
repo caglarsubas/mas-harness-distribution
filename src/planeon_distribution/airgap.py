@@ -15,7 +15,8 @@ from typing import Any, Mapping
 from .canonical import CanonicalJsonError, decode, encode
 from .licenses import load_policy as load_license_policy
 from .model_custody import validate_manifest
-from .oci import layout_tree_digest, verify_layout
+from .oci import LayoutError, layout_tree_digest, verify_layout
+from .publication import publish_directory, publish_file
 from .signing import verify_signed_release
 from .vulnerabilities import load_database, load_dispositions, load_policy as load_vulnerability_policy
 
@@ -135,6 +136,13 @@ def export_archive(released: Path, evidence: Mapping[str, Path], destination: Pa
         _fail("ARCHIVE_DESTINATION_EXISTS")
     parent = destination.parent.resolve(strict=True)
     record, signed, lock = _release_subject(released, verification_time)
+    try:
+        verify_layout(released / "bundle/oci")
+        layout_digest = layout_tree_digest(released / "bundle/oci")
+    except LayoutError as exc:
+        raise AirgapError("RELEASE_LAYOUT_INVALID") from exc
+    if layout_digest != lock.get("ociLayoutDigest"):
+        _fail("RELEASE_LAYOUT_MISMATCH")
     files = _collect_tree(released, "payload")
     files.update(_validate_evidence_map(evidence, released))
     if not files or len(files) > MAX_ENTRIES - 1 or sum(len(data) for data in files.values()) > MAX_TOTAL_BYTES:
@@ -168,16 +176,27 @@ def export_archive(released: Path, evidence: Mapping[str, Path], destination: Pa
         with temporary.open("rb") as stream:
             os.fsync(stream.fileno())
         archive_digest = _sha(temporary.read_bytes())
-        os.replace(temporary, parent / destination.name)
+        publish_file(temporary, parent / destination.name, "ARCHIVE_DESTINATION_EXISTS", AirgapError)
         return {"archiveDigest": archive_digest, "entryCount": len(entries), "releaseDigest": signed["releaseDigest"]}
     finally:
         temporary.unlink(missing_ok=True)
 
 
-def _inspect_archive(archive_path: Path, expected_digest: str) -> tuple[tarfile.TarFile, list[tarfile.TarInfo]]:
-    data = _regular(archive_path, "ARCHIVE_UNAVAILABLE")
+def _archive_bytes(path: Path) -> bytes:
+    """Read the whole transfer archive under its own 16 MiB cap, not the per-member file cap."""
+    if path.is_symlink() or not path.is_file() or path.stat().st_nlink != 1:
+        _fail("ARCHIVE_UNAVAILABLE")
+    if path.stat().st_size > MAX_ARCHIVE_BYTES:
+        _fail("ARCHIVE_LIMIT_EXCEEDED")
+    with path.open("rb") as stream:
+        data = stream.read(MAX_ARCHIVE_BYTES + 1)
     if len(data) > MAX_ARCHIVE_BYTES:
         _fail("ARCHIVE_LIMIT_EXCEEDED")
+    return data
+
+
+def _inspect_archive(archive_path: Path, expected_digest: str) -> tuple[tarfile.TarFile, list[tarfile.TarInfo]]:
+    data = _archive_bytes(archive_path)
     if expected_digest != _sha(data):
         _fail("ARCHIVE_DIGEST_MISMATCH")
     try:
@@ -292,7 +311,7 @@ def import_archive(archive_path: Path, expected_digest: str, destination: Path, 
         receipt_payload = {"archiveDigest": expected_digest, "ociLayoutDigest": manifest["ociLayoutDigest"], "releaseDigest": report["releaseDigest"], "schemaVersion": RECEIPT_SCHEMA, "state": "VERIFIED_IMPORT", "verificationTime": verification_time}
         receipt = {**receipt_payload, "receiptDigest": _sha(encode(receipt_payload))}
         (staging / "import.receipt.json").write_bytes(encode(receipt))
-        os.replace(staging, parent / destination.name)
+        publish_directory(staging, parent / destination.name, "IMPORT_DESTINATION_EXISTS", AirgapError)
         return receipt
     finally:
         archive.close()

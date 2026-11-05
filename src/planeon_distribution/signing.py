@@ -13,6 +13,8 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from .canonical import CanonicalJsonError, decode, encode
+from .oci import LayoutError, layout_tree_digest, verify_layout
+from .publication import publish_directory
 
 COSIGN = Path("/opt/planeon/bin/cosign")
 COSIGN_SHA256 = "e1775d26440ce3f57a95599d34d2b976c6400e06d1b31b6bea927f4857e3fe18"
@@ -233,6 +235,13 @@ def sign_candidate(
     if approval["profileId"] != lock.get("profileId") or release_key_id not in approval["authorizedReleaseKeyIds"]:
         _fail("RELEASE_APPROVAL_SCOPE_MISMATCH")
     trust, trust_file_digest, release_public = load_trust(trust_path, public_keys, "BUNDLE_RELEASE", release_key_id, verification_time)
+    try:
+        verify_layout(bundle_directory / "oci")
+        layout_digest = layout_tree_digest(bundle_directory / "oci")
+    except LayoutError as exc:
+        raise SigningError("BUNDLE_LAYOUT_INVALID") from exc
+    if layout_digest != lock.get("ociLayoutDigest"):
+        _fail("BUNDLE_LAYOUT_MISMATCH")
     staging = Path(tempfile.mkdtemp(prefix=".planeon-signed-", dir=parent))
     staging.chmod(0o700)
     try:
@@ -295,7 +304,7 @@ def sign_candidate(
         signed = {**signed_payload, "releaseDigest": _sha(encode(signed_payload))}
         _write(staging / "signed-release.json", signed, 0o644)
         verify_signed_release(staging, verification_time)
-        os.replace(staging, parent / destination.name)
+        publish_directory(staging, parent / destination.name, "SIGNED_DESTINATION_EXISTS", SigningError)
         return signed
     finally:
         if staging.exists():
