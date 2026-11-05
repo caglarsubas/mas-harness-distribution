@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import shutil
 import tempfile
@@ -10,6 +11,8 @@ from pathlib import Path
 from typing import Any
 
 from .canonical import encode
+from .oci import LayoutError, layout_tree_digest, verify_layout
+from .publication import publish_directory
 from .signing import SigningError, verify_signed_release
 
 RECORD_SCHEMA = "harness.planeon.ai/released-bundle-record/v1alpha1"
@@ -58,6 +61,13 @@ def promote(bundle_directory: Path, signed_directory: Path, releases_root: Path,
         verified = verify_signed_release(staging / "release", verification_time)
         if verified != signed or (staging / "bundle/bundle.lock.json").read_bytes() != (staging / "release/bundle.lock.json").read_bytes():
             _fail("PROMOTION_COPY_CHANGED")
+        try:
+            verify_layout(staging / "bundle/oci")
+            layout_digest = layout_tree_digest(staging / "bundle/oci")
+        except LayoutError as exc:
+            raise PromotionError("PROMOTION_LAYOUT_INVALID") from exc
+        if layout_digest != json.loads((staging / "bundle/bundle.lock.json").read_text(encoding="utf-8")).get("ociLayoutDigest"):
+            _fail("PROMOTION_LAYOUT_MISMATCH")
         payload = {
             "organizationId": __import__("json").loads((staging / "release/release-manifest.json").read_text(encoding="utf-8"))["organizationId"],
             "promotedAt": verification_time,
@@ -74,7 +84,7 @@ def promote(bundle_directory: Path, signed_directory: Path, releases_root: Path,
             os.fsync(stream.fileno())
         if fail_before_publish:
             _fail("INJECTED_PROMOTION_FAILURE")
-        os.replace(staging, destination)
+        publish_directory(staging, destination, "RELEASE_DESTINATION_EXISTS", PromotionError)
         return record
     finally:
         if staging.exists():

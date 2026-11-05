@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import os
 import re
 import shutil
 import tempfile
@@ -12,6 +11,7 @@ from typing import Any
 
 from .canonical import CanonicalJsonError, decode, encode
 from .oci import layout_tree_digest, verify_layout
+from .publication import publish_directory
 
 SCHEMA = "harness.planeon.ai/oci-relocation-receipt/v1alpha1"
 TARGET_ID = re.compile(r"^[a-z][a-z0-9.-]{2,63}$")
@@ -68,7 +68,7 @@ def relocate(imported: Path, destination: Path, target_id: str, *, fail_before_p
         (staging / "relocation.receipt.json").write_bytes(encode(result))
         if fail_before_publish:
             _fail("INJECTED_RELOCATION_FAILURE")
-        os.replace(staging, parent / destination.name)
+        publish_directory(staging, parent / destination.name, "RELOCATION_DESTINATION_EXISTS", RelocationError)
         return result
     finally:
         if staging.exists():

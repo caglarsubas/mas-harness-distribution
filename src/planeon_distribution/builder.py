@@ -11,6 +11,7 @@ from typing import Any
 
 from .canonical import encode
 from .oci import INDEX_MEDIA, LayoutError, layout_tree_digest, verify_layout
+from .publication import publish_directory
 
 
 class BuildError(ValueError):
@@ -95,10 +96,7 @@ def build_bundle(resolution: dict[str, Any], source_layout: Path, destination: P
         _fsync_directory(staging)
         if fail_before_publish:
             _fail("INJECTED_PREPUBLISH_FAILURE")
-        try:
-            os.replace(staging, destination_absolute)
-        except OSError as exc:
-            raise BuildError("ATOMIC_PUBLISH_FAILED") from exc
+        publish_directory(staging, destination_absolute, "DESTINATION_EXISTS", BuildError)
         _fsync_directory(parent)
         return {"bundleId": f"sha256:{hashlib.sha256(lock_bytes).hexdigest()}", "state": "BUILT_UNSIGNED"}
     finally:
