@@ -71,22 +71,42 @@ class PacketTransportError(ValueError):
     """The hash-pinned packet transport is malformed or unsafe."""
 
 
-def read_packet_text(path: Path) -> tuple[str, str]:
+def read_packet_bytes(path: Path) -> tuple[bytes, str, str]:
+    """Read the packet once; return its bytes, their strict UTF-8 text and the sha256 of exactly those bytes."""
+
     flags = os.O_RDONLY
     if hasattr(os, "O_CLOEXEC"):
         flags |= os.O_CLOEXEC
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW
-    descriptor = os.open(path, flags)
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        raise PacketTransportError("packet cannot be opened") from exc
     try:
         metadata = os.fstat(descriptor)
         if not stat.S_ISREG(metadata.st_mode):
             raise PacketTransportError("HARNESS_TASK_PACKET must name a regular file")
-        with os.fdopen(descriptor, "r", encoding="utf-8", closefd=False) as stream:
-            text = stream.read()
+        with os.fdopen(descriptor, "rb", closefd=False) as stream:
+            raw = stream.read()
     finally:
         os.close(descriptor)
-    return text, hashlib.sha256(text.encode("utf-8")).hexdigest()
+    if raw.startswith(b"\xef\xbb\xbf"):
+        raise PacketTransportError("packet starts with a UTF-8 byte order mark")
+    try:
+        text = raw.decode("utf-8", errors="strict")
+    except UnicodeDecodeError as exc:
+        raise PacketTransportError("packet is not strict UTF-8") from exc
+    if b"\r\n" in raw:
+        raise PacketTransportError("packet has CRLF line endings")
+    if b"\r" in raw:
+        raise PacketTransportError("packet has a bare carriage return")
+    return raw, text, hashlib.sha256(raw).hexdigest()
+
+
+def read_packet_text(path: Path) -> tuple[str, str]:
+    _, text, digest = read_packet_bytes(path)
+    return text, digest
 
 
 def verify_packet_digest(path: Path, expected_digest: str) -> None:
