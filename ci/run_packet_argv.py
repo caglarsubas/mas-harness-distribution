@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import json
 import os
+import shutil
 import stat
 import subprocess
 import sys
@@ -175,6 +176,18 @@ def scrub_environment(environment: dict[str, str]) -> dict[str, str]:
     }
 
 
+def _no_inheritable_fds() -> None:
+    for name in os.listdir("/dev/fd"):
+        fd = int(name)
+        if fd > 2:
+            try:
+                inheritable = os.get_inheritable(fd)
+            except OSError:
+                continue
+            if inheritable:
+                raise SystemExit(f"packet runner refused: descriptor {fd} is inheritable")
+
+
 def run_commands(
     commands: list[list[str]],
     *,
@@ -189,7 +202,12 @@ def run_commands(
             json.dumps(command, separators=(",", ":")),
             flush=True,
         )
-        completed = subprocess.run(command, env=environment, shell=False, check=False)
+        # MET-007 [PC-5]: posix_spawn, not fork+exec (about 50 s of argv 63 under 12 workers, slot 288 BISECT2): an
+        # absolute executable and close_fds=False let CPython take its posix_spawn path; PEP 446 keeps this process's own
+        # descriptors non-inheritable, and _no_inheritable_fds() refuses the run if any descriptor above 2 is inheritable.
+        _no_inheritable_fds()
+        executable = shutil.which(command[0], path=environment.get("PATH")) or command[0]
+        completed = subprocess.run([executable, *command[1:]], env=environment, shell=False, check=False, close_fds=False)
         verify_packet_digest(packet_path, packet_digest)
         if completed.returncode != 0:
             return completed.returncode
